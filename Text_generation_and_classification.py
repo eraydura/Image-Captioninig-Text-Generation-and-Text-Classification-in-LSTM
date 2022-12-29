@@ -59,7 +59,7 @@ class Text_Generation():
     model.compile(optimizer=RMSprop(), loss='sparse_categorical_crossentropy')
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-    history = model.fit(self.dataset, epochs=self.EPOCH,callback=[tensorboard_callback])
+    history = model.fit(self.dataset, epochs=self.EPOCH,callbacks=[tensorboard_callback])
     self.test(model)
 
   def test(self,model):
@@ -142,7 +142,7 @@ class Text_Clasification():
           accr = model.evaluate(test_sequences_matrix,Y)
           results.append([accr[0],accr[1]])
 
-textgeneration=Text_Generation()
+textgeneration=Text_Generation("Romeo")
 textgeneration.train()
 
 textclass=Text_Clasification()
