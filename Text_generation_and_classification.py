@@ -4,8 +4,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from keras.preprocessing.image import load_img, img_to_array
+from tqdm.notebook import tqdm
+from keras.applications.vgg16 import VGG16, preprocess_input
 from keras.models import Model
-from keras.layers import LSTM, Activation, Dense, Dropout, Input, Embedding
+from keras.layers import LSTM, Activation, Dense, Dropout, Input, Embedding, add
 from keras.optimizers import RMSprop
 from keras.preprocessing.text import Tokenizer
 from keras_preprocessing.sequence import pad_sequences
@@ -13,8 +16,10 @@ from keras.utils import to_categorical
 from keras.callbacks import EarlyStopping
 from keras.models import Sequential
 import datetime
+import cv2
+import os
 import tensorflow as tf
-# %matplotlib inline
+%matplotlib inline
 
 class Text_Generation():
   def __init__(self,startString):
@@ -55,7 +60,6 @@ class Text_Generation():
 
   def train(self):
     model = self.model()
-    model.summary()
     model.compile(optimizer=RMSprop(), loss='sparse_categorical_crossentropy')
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
@@ -141,6 +145,124 @@ class Text_Clasification():
           test_sequences_matrix = pad_sequences(test_sequences,maxlen=self.max_len)
           accr = model.evaluate(test_sequences_matrix,Y)
           results.append([accr[0],accr[1]])
+
+class Image_Captioning():
+  def __init__(self):
+        self.features = {}
+        self.mapping = {}
+        self.all_cptns = []
+        self.data()
+        self.tokenizer = Tokenizer()
+        self.tokenizer.fit_on_texts(self.all_cptns)
+        self.vocab_size = len(self.tokenizer.word_index) + 1
+        self.max_len = max(len(cptn.split()) for cptn in self.all_cptns)
+        self.batch_size=32
+        self.img_ids = list(self.mapping.keys())
+        self.train_data = self.img_ids[:int(len(self.img_ids) * 0.8)]
+        self.test_data = self.img_ids[int(len(self.img_ids) * 0.8):]
+        self.steps = len(self.train_data) // self.batch_size
+        self.epoch=20    
+        self.img_files = os.listdir('/content/train/Images')
+
+  def data(self):
+        with open(os.path.join('/content/train/captions.txt'), 'r') as f:
+            next(f)
+
+            for line in f.read().split('\n'):
+                tokens = line.split(',')
+                img_id, cptns = tokens[0], tokens[1:]
+                img_id = img_id.split('.')[0]
+                cptns = " ".join(cptns)
+                if img_id not in self.mapping:
+                    self.mapping[img_id] = []
+                self.mapping[img_id].append(cptns)
+
+            for key, cptns in self.mapping.items():
+                for i in range(len(cptns)):
+                    caption = cptns[i].lower().replace('[^A-Za-z]', '').replace('\s+', ' ')
+                    cptns[i] = 'startseq ' + " ".join([word for word in caption.split() if len(word)>1]) + ' endseq'
+
+            for key in self.mapping:
+                for cptn in self.mapping[key]:
+                    self.all_cptns.append(cptn)
+
+  def data_generator(self):
+            x1, x2, y = [], [], []
+            n = 0
+            while True:
+                for key in self.train_data:
+                    n += 1
+                    cptns = self.mapping[key]
+                    for cptn in cptns:
+                        seq = self.tokenizer.texts_to_sequences([cptn])[0]
+                        for i in range(len(seq)):
+                            in_seq, out_seq = seq[:i], seq[i]
+                            in_seq = pad_sequences([in_seq], maxlen=self.max_len)[0]
+                            out_seq = to_categorical([out_seq], num_classes=self.vocab_size)[0]
+                            x1.append(self.features[key][0])
+                            x2.append(in_seq)
+                            y.append(out_seq)
+                        
+                    if n == self.batch_size:
+                        x1, x2, y = np.array(x1), np.array(x2), np.array(y)
+                        yield [x1,x2], y
+                        x1, x2, y = [], [], []
+                        n = 0 
+
+  def training_model(self):
+          vgg_model = VGG16()
+          vgg_model = Model(inputs=vgg_model.inputs, outputs=vgg_model.layers[-2].output)
+          vgg_model.summary()
+          for img_name in tqdm(self.img_files):
+              img = load_img('/content/train/Images/' + img_name, target_size=(224,224))
+              img = preprocess_input(np.expand_dims(img_to_array(img), axis=0))
+              feature = vgg_model.predict(img, verbose=0)
+              self.features[img_name.split('.')[0]] = feature
+          input1 = Input(shape=(4096,))
+          l1 = Dropout(0.1)(input1)
+          l2 = Dense(1024, activation='relu')(l1)
+          input2 = Input(shape=(self.max_len,))
+          l3 = Embedding(self.vocab_size, 256, mask_zero=True)(input2)
+          l4 = Dropout(0.1)(l3)
+          l5 = LSTM(1024)(l4)
+          dcdr1 = add([l2,l5])
+          dcdr2 = Dense(1024, activation='relu')(dcdr1)
+          output = Dense(self.vocab_size, activation = 'softmax')(dcdr2)
+          self.train(output,[input1,input2])
+
+  def train(self,output,input):
+          model = Model(inputs=input, outputs=output)
+          model.compile(loss='categorical_crossentropy', optimizer='adam')
+          generator = self.data_generator()
+          model.fit(generator, epochs=self.epoch, steps_per_epoch=self.steps, verbose=1)
+          self.predict_captions(model)
+
+  def idx_to_word(self, intgr, tokenizer):
+      for word, idx in tokenizer.word_index.items():
+          if idx == intgr:
+              return word
+      return None
+
+  def predict_captions(self, model):
+        test_img_id = self.test_data[np.random.randint(0, len(self.test_data))]
+        captions = self.mapping[test_img_id]
+        in_text = 'startseq'
+        for i in range(self.max_len):
+            seq = pad_sequences([self.tokenizer.texts_to_sequences([in_text])[0]], self.max_len)
+            prd = np.argmax(model.predict([image, seq], verbose=0))
+            word = self.idx_to_word(prd, self.tokenizer)
+            if word is None:
+                break
+            in_text += " " + word
+            if word == 'endseq':
+                break
+        img = cv2.cvtColor(cv2.imread('../input/flickr8k/Images/' + test_img_id + '.jpg', 1), cv2.COLOR_BGR2RGB)
+        plt.imshow(img)
+        print(in_text)
+    
+
+image=Image_Captioning()
+image.training_model()
 
 textgeneration=Text_Generation("Romeo")
 textgeneration.train()
