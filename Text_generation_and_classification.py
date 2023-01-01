@@ -172,7 +172,7 @@ class Image_Captioning():
         self.train_data = self.img_ids[:int(len(self.img_ids) * 0.8)]
         self.test_data = self.img_ids[int(len(self.img_ids) * 0.8):]
         self.steps = len(self.train_data) // self.batch_size
-        self.epoch=2 
+        self.epoch=1
         self.img_files = os.listdir('/content/train/Images')
 
   def data(self):
@@ -246,21 +246,27 @@ class Image_Captioning():
           model.fit(generator, epochs=self.epoch, steps_per_epoch=self.steps, verbose=1)
           self.predict_captions(model)
 
+  def word(self,intgr, tokenizer):
+    for word, idx in tokenizer.word_index.items():
+        if idx == intgr:
+            return word
+    return None
+
   def predict_captions(self, model):
         test_img_id = self.test_data[np.random.randint(0, len(self.test_data))]
         captions = self.mapping[test_img_id]
         in_text = 'startseq'
         for i in range(self.max_len):
-            seq = pad_sequences([self.tokenizer.texts_to_sequences([in_text])[0]], self.max_len)
-            prd = np.argmax(model.predict([image, seq], verbose=0))
-            for word, idx in self.tokenizer.word_index.items():
-              if idx == prd:
-                 word = word
-              if word is None:
-                  break
-              if word == 'endseq':
-                  break
-              in_text += " " + word
+            seq = self.tokenizer.texts_to_sequences([in_text])[0]
+            seq = pad_sequences([seq], self.max_len)
+            prd = model.predict([self.features[test_img_id], seq], verbose=0)
+            prd = np.argmax(prd)
+            word = self.word(prd, self.tokenizer)
+            if word is None:
+                break
+            in_text += " " + word
+            if word == 'endseq':
+                break
         img = cv2.cvtColor(cv2.imread('/content/train/Images/' + test_img_id + '.jpg', 1), cv2.COLOR_BGR2RGB)
         plt.imshow(img)
         print(in_text)
@@ -274,5 +280,3 @@ textgeneration.train()
 
 textclass=Text_Clasification()
 textclass.train()
-
-  
