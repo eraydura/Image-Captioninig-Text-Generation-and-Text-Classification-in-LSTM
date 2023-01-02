@@ -1,3 +1,5 @@
+
+
 """
 ! pip install -q kaggle
 from google.colab import files
@@ -42,12 +44,13 @@ class Text_Generation():
     self.rnn_units= 1024
     self.BATCH_SIZE = 64
     self.BUFFER_SIZE = 10000
-    self.EPOCH=50
+    self.EPOCH=1
     self.seq_length= 150
     self.startString=startString
     self.num_generate = 1000 
     self.text_generated = []
-    self.checkpoint_prefix = os.path.join('./training_checkpoints_LSTM', "checkpt_{epoch}")
+    self.lstm_dir_checkpoints= './training_checkpoints_LSTM'
+    self.checkpoint_prefix = os.path.join(self.lstm_dir_checkpoints, "checkpt_{epoch}")
     self.data()
 
   def input_target(self,chunk):
@@ -76,24 +79,28 @@ class Text_Generation():
     model.compile(optimizer=RMSprop(), loss='sparse_categorical_crossentropy')
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-    checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_prefix,save_weights_only=True)
-    history = model.fit(self.dataset, epochs=self.EPOCH,callbacks=[tensorboard_callback,checkpoint_callback])
-    self.generate_text()
+    lstm_dir_checkpoints= './training_checkpoints_LSTM'
+    checkpoint_prefix = os.path.join(lstm_dir_checkpoints, "checkpt_{epoch}")
+    checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True)
+    history = model.fit(self.dataset, epochs=self.EPOCH, callbacks=[tensorboard_callback,checkpoint_callback])
+    tf.train.latest_checkpoint(lstm_dir_checkpoints)
+    model.load_weights(tf.train.latest_checkpoint(lstm_dir_checkpoints))
+    model.build(tf.TensorShape([1, None]))
+    self.generate_text(model)
 
-  def generate_text(self):
-      self.batch_size=1
-      lstm_model = self.model()
-      lstm_model.load_weights(tf.train.latest_checkpoint(self.lstm_dir_checkpoints))
-      lstm_model.build(tf.TensorShape([1, None]))
-      num_generate = 1000 
-      input_eval = tf.expand_dims([self.char2index[s] for s in self.startString] , 0)
-      lstm_model.reset_states()
-      for i in range(num_generate):
-          predictions = tf.squeeze(lstm_model(input_eval), 0) / 0.5
-          predicted_id = tf.random.categorical(predictions, num_samples=1)[-1,0].numpy()
-          input_eval = tf.expand_dims([predicted_id], 0)
-          self.text_generated.append(self.index2char[predicted_id])
-      print(self.startString+ ''.join(self.text_generated))
+  def generate_text(self,model):
+    num_generate = 1000
+    input_eval = [self.char2index[s] for s in self.startString] 
+    input_eval = tf.expand_dims(input_eval, 0)
+    model.reset_states()
+    for i in range(num_generate):
+        predictions = model(input_eval)
+        predictions = tf.squeeze(predictions, 0)
+        predictions = predictions / 0.5
+        predicted_id = tf.random.categorical(predictions, num_samples=1)[-1,0].numpy()
+        input_eval = tf.expand_dims([predicted_id], 0)
+        self.text_generated.append(self.index2char[predicted_id])
+    print(self.startString+ ''.join(self.text_generated))
 
 class Text_Clasification():
   def __init__(self):
