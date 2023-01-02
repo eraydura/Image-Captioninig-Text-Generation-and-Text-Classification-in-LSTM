@@ -32,6 +32,8 @@ import datetime
 import cv2
 import os
 import tensorflow as tf
+import logging
+tf.get_logger().setLevel(logging.ERROR)
 %matplotlib inline
 
 def loss(labels, logits):
@@ -45,7 +47,8 @@ class Text_Generation():
       self.int_text = np.array([self.char2index[i] for i in self.text])
       self.index2char = np.array(self.vocabulary)
       self.checkpoints= './training_checkpoints_LSTM'
-      self.checkpoint = os.path.join(self.checkpoints, "checkpt_{epoch}") #name
+      self.checkpoint = os.path.join(self.checkpoints, "checkpt_{epoch}") 
+      self.log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
       self.seq_length= 150
       self.examples_per_epoch = len(self.text)
       self.char_dataset = tf.data.Dataset.from_tensor_slices(self.int_text)
@@ -59,7 +62,7 @@ class Text_Generation():
       self.rnn_units= 1024
       self.text_generated = []
       self.num_generate = 1000 
-      self.EPOCHS=1
+      self.EPOCHS=20
 
   def create_input_target_pair(self,chunk):
       input_text = chunk[:-1]
@@ -67,22 +70,16 @@ class Text_Generation():
       return input_text, target_text
 
   def build_model_lstm(self):
-      model = tf.keras.Sequential([
-      tf.keras.layers.Embedding(self.vocab_size, self.embedding_dim,
-                                batch_input_shape=[self.BATCH_SIZE, None]),
-      tf.keras.layers.LSTM(self.rnn_units, 
-                          return_sequences=True,
-                          stateful=True,
-                          recurrent_initializer='glorot_uniform'),
-      tf.keras.layers.Dense(self.vocab_size)
-    ])
+      model = Sequential()
+      model.add(Embedding(self.vocab_size, self.embedding_dim,batch_input_shape=[self.BATCH_SIZE, None]))
+      model.add(LSTM(self.rnn_units, return_sequences=True,stateful=True,recurrent_initializer='glorot_uniform'))
+      model.add(Dense(self.vocab_size))
       return model
 
   def train(self):
     lstm_model = self.build_model_lstm()
     lstm_model.compile(optimizer=RMSprop(),metrics=['accuracy'], loss=loss)
-    log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
     checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint,save_weights_only=True)
     history = lstm_model.fit(self.dataset, epochs=self.EPOCHS, callbacks=[checkpoint_callback,tensorboard_callback])
     self.generate_text()
@@ -100,7 +97,7 @@ class Text_Generation():
           predicted_id = tf.random.categorical(tf.squeeze(model(input_eval), 0) / 0.5, num_samples=1)[-1,0].numpy()
           input_eval = tf.expand_dims([predicted_id], 0)
           self.text_generated.append(self.index2char[predicted_id])
-      print_(start_string + ''.join(self.text_generated))
+      print(start_string + ''.join(self.text_generated))
 
 class Text_Clasification():
   def __init__(self):
@@ -283,7 +280,7 @@ class Image_Captioning():
         plt.imshow(img)
         print(in_text)
     
-textgeneration=Text_Generation("Romeo")
+textgeneration=Text_Generation()
 textgeneration.train()
 
 image=Image_Captioning()
