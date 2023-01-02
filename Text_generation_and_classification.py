@@ -1,4 +1,4 @@
-
+"""
 ! pip install -q kaggle
 from google.colab import files
 files.upload()
@@ -7,6 +7,7 @@ files.upload()
 ! chmod 600 ~/.kaggle/kaggle.json
 ! kaggle datasets download -d adityajn105/flickr8k
 ! unzip flickr8k.zip -d train
+"""
 
 import pandas as pd
 import numpy as np
@@ -14,9 +15,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tqdm.notebook import tqdm
-from keras.applications.resnet import ResNet101,preprocess_input
+from tensorflow.keras.applications.resnet import ResNet50, preprocess_input
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from keras.models import Model
 from keras.layers import LSTM, Activation, Dense, Dropout, Input, Embedding, add
 from keras.optimizers import RMSprop
@@ -41,15 +42,15 @@ class Text_Generation():
     self.rnn_units= 1024
     self.BATCH_SIZE = 64
     self.BUFFER_SIZE = 10000
-    self.EPOCH=5
+    self.EPOCH=50
     self.seq_length= 150
     self.startString=startString
     self.num_generate = 1000 
     self.text_generated = []
-    self.lstm_dir_checkpoints= './training_checkpoints_LSTM'
+    self.checkpoint_prefix = os.path.join('./training_checkpoints_LSTM', "checkpt_{epoch}")
     self.data()
 
-  def create_input_target_pair(self,chunk):
+  def input_target(self,chunk):
     input_text = chunk[:-1]
     target_text = chunk[1:]
     return input_text, target_text
@@ -59,7 +60,7 @@ class Text_Generation():
     int_text = np.array([self.char2index[i] for i in self.text])
     char_dataset = tf.data.Dataset.from_tensor_slices(int_text)
     sequences = char_dataset.batch(self.seq_length+1, drop_remainder=True)
-    dataset = sequences.map(self.create_input_target_pair)
+    dataset = sequences.map(self.input_target)
     self.dataset = dataset.shuffle(self.BUFFER_SIZE).batch(self.BATCH_SIZE, drop_remainder=True)
 
   def model(self):
@@ -73,9 +74,9 @@ class Text_Generation():
   def train(self):
     model = self.model()
     model.compile(optimizer=RMSprop(), loss='sparse_categorical_crossentropy')
-    checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(self.lstm_dir_checkpoints, "checkpt_{epoch}") ,save_weights_only=True)
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+    checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_prefix,save_weights_only=True)
     history = model.fit(self.dataset, epochs=self.EPOCH,callbacks=[tensorboard_callback,checkpoint_callback])
     self.generate_text()
 
@@ -84,14 +85,15 @@ class Text_Generation():
       lstm_model = self.model()
       lstm_model.load_weights(tf.train.latest_checkpoint(self.lstm_dir_checkpoints))
       lstm_model.build(tf.TensorShape([1, None]))
+      num_generate = 1000 
       input_eval = tf.expand_dims([self.char2index[s] for s in self.startString] , 0)
       lstm_model.reset_states()
       for i in range(num_generate):
           predictions = tf.squeeze(lstm_model(input_eval), 0) / 0.5
           predicted_id = tf.random.categorical(predictions, num_samples=1)[-1,0].numpy()
           input_eval = tf.expand_dims([predicted_id], 0)
-          text_generated.append(self.index2char[predicted_id])
-      print(start_string + ''.join(text_generated))
+          self.text_generated.append(self.index2char[predicted_id])
+      print(self.startString+ ''.join(self.text_generated))
 
 class Text_Clasification():
   def __init__(self):
@@ -175,7 +177,7 @@ class Image_Captioning():
         self.train_data = self.img_ids[:int(len(self.img_ids) * 0.8)]
         self.test_data = self.img_ids[int(len(self.img_ids) * 0.8):]
         self.steps = len(self.train_data) // self.batch_size
-        self.epoch=20
+        self.epoch=2
         self.img_files = os.listdir('/content/train/Images')
 
   def data(self):
@@ -224,7 +226,7 @@ class Image_Captioning():
                         n = 0 
 
   def training_model(self):
-          resnet_model = ResNet101()
+          resnet_model = ResNet50()
           resnet_model = Model(inputs=resnet_model.inputs, outputs=resnet_model.layers[-2].output)
           for img_name in tqdm(self.img_files):
               img = load_img('/content/train/Images/' + img_name, target_size=(224,224))
