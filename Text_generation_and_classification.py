@@ -34,73 +34,73 @@ import os
 import tensorflow as tf
 %matplotlib inline
 
+def loss(labels, logits):
+    return tf.keras.losses.sparse_categorical_crossentropy(labels, logits, from_logits=True)
+  
 class Text_Generation():
-  def __init__(self,startString):
-    self.text = open('text.txt', 'r').read() 
-    self.vocabulary = sorted(set(self.text))
-    self.vocab_size = len(self.vocabulary)
-    self.index2char = np.array(self.vocabulary)
-    self.embedding_dim = 256
-    self.rnn_units= 1024
-    self.BATCH_SIZE = 64
-    self.BUFFER_SIZE = 10000
-    self.EPOCH=1
-    self.seq_length= 150
-    self.startString=startString
-    self.num_generate = 1000 
-    self.text_generated = []
-    self.lstm_dir_checkpoints= './training_checkpoints_LSTM'
-    self.checkpoint_prefix = os.path.join(self.lstm_dir_checkpoints, "checkpt_{epoch}")
-    self.data()
+  def __init__(self):
+      self.text = open('text.txt', 'r').read()
+      self.vocabulary = sorted(set(self.text))
+      self.char2index = {c:i for i,c in enumerate(self.vocabulary)}
+      self.int_text = np.array([self.char2index[i] for i in self.text])
+      self.index2char = np.array(self.vocabulary)
+      self.checkpoints= './training_checkpoints_LSTM'
+      self.checkpoint = os.path.join(self.checkpoints, "checkpt_{epoch}") #name
+      self.seq_length= 150
+      self.examples_per_epoch = len(self.text)
+      self.char_dataset = tf.data.Dataset.from_tensor_slices(self.int_text)
+      self.sequences = self.char_dataset.batch(self.seq_length+1, drop_remainder=True)
+      self.dataset = self.sequences.map(self.create_input_target_pair)
+      self.BATCH_SIZE = 64
+      self.BUFFER_SIZE = 10000
+      self.dataset = self.dataset.shuffle(self.BUFFER_SIZE).batch(self.BATCH_SIZE, drop_remainder=True)
+      self.vocab_size = len(self.vocabulary)
+      self.embedding_dim = 256
+      self.rnn_units= 1024
+      self.text_generated = []
+      self.num_generate = 1000 
+      self.EPOCHS=1
 
-  def input_target(self,chunk):
-    input_text = chunk[:-1]
-    target_text = chunk[1:]
-    return input_text, target_text
-        
-  def data(self):
-    self.char2index = {c:i for i,c in enumerate(self.vocabulary)}
-    int_text = np.array([self.char2index[i] for i in self.text])
-    char_dataset = tf.data.Dataset.from_tensor_slices(int_text)
-    sequences = char_dataset.batch(self.seq_length+1, drop_remainder=True)
-    dataset = sequences.map(self.input_target)
-    self.dataset = dataset.shuffle(self.BUFFER_SIZE).batch(self.BATCH_SIZE, drop_remainder=True)
+  def create_input_target_pair(self,chunk):
+      input_text = chunk[:-1]
+      target_text = chunk[1:]
+      return input_text, target_text
 
-  def model(self):
-    model = Sequential()
-    model.add(Embedding(self.vocab_size, 256,batch_input_shape=[64, None]))
-    model.add(LSTM(1024,return_sequences=True,recurrent_initializer='glorot_uniform'))
-    model.add(Dense(self.vocab_size, activation='softmax'))
-    model.summary() 
-    return model
+  def build_model_lstm(self):
+      model = tf.keras.Sequential([
+      tf.keras.layers.Embedding(self.vocab_size, self.embedding_dim,
+                                batch_input_shape=[self.BATCH_SIZE, None]),
+      tf.keras.layers.LSTM(self.rnn_units, 
+                          return_sequences=True,
+                          stateful=True,
+                          recurrent_initializer='glorot_uniform'),
+      tf.keras.layers.Dense(self.vocab_size)
+    ])
+      return model
 
   def train(self):
-    model = self.model()
-    model.compile(optimizer=RMSprop(), loss='sparse_categorical_crossentropy')
+    lstm_model = self.build_model_lstm()
+    lstm_model.compile(optimizer=RMSprop(),metrics=['accuracy'], loss=loss)
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-    lstm_dir_checkpoints= './training_checkpoints_LSTM'
-    checkpoint_prefix = os.path.join(lstm_dir_checkpoints, "checkpt_{epoch}")
-    checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix,save_weights_only=True)
-    history = model.fit(self.dataset, epochs=self.EPOCH, callbacks=[tensorboard_callback,checkpoint_callback])
-    tf.train.latest_checkpoint(lstm_dir_checkpoints)
-    model.load_weights(tf.train.latest_checkpoint(lstm_dir_checkpoints))
-    model.build(tf.TensorShape([1, None]))
-    self.generate_text(model)
+    checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint,save_weights_only=True)
+    history = lstm_model.fit(self.dataset, epochs=self.EPOCHS, callbacks=[checkpoint_callback,tensorboard_callback])
+    self.generate_text()
 
-  def generate_text(self,model):
-    num_generate = 1000
-    input_eval = [self.char2index[s] for s in self.startString] 
-    input_eval = tf.expand_dims(input_eval, 0)
-    model.reset_states()
-    for i in range(num_generate):
-        predictions = model(input_eval)
-        predictions = tf.squeeze(predictions, 0)
-        predictions = predictions / 0.5
-        predicted_id = tf.random.categorical(predictions, num_samples=1)[-1,0].numpy()
-        input_eval = tf.expand_dims([predicted_id], 0)
-        self.text_generated.append(self.index2char[predicted_id])
-    print(self.startString+ ''.join(self.text_generated))
+  def generate_text(self):
+      self.BATCH_SIZE = 1
+      model = self.build_model_lstm()
+      model.load_weights(tf.train.latest_checkpoint(self.checkpoints))
+      model.build(tf.TensorShape([1, None]))
+      start_string = input("Enter your starting string: ")
+      input_eval = [self.char2index[s] for s in start_string]
+      input_eval = tf.expand_dims(input_eval, 0)
+      model.reset_states()
+      for i in range(self.num_generate):
+          predicted_id = tf.random.categorical(tf.squeeze(model(input_eval), 0) / 0.5, num_samples=1)[-1,0].numpy()
+          input_eval = tf.expand_dims([predicted_id], 0)
+          self.text_generated.append(self.index2char[predicted_id])
+      print_(start_string + ''.join(self.text_generated))
 
 class Text_Clasification():
   def __init__(self):
