@@ -48,7 +48,7 @@ class Text_Generation():
       self.index2char = np.array(self.vocabulary)
       self.checkpoints= './training_checkpoints_LSTM'
       self.checkpoint = os.path.join(self.checkpoints, "checkpt_{epoch}") 
-      self.log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+      self.log_dir = "logs/textgeneration/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
       self.seq_length= 150
       self.examples_per_epoch = len(self.text)
       self.char_dataset = tf.data.Dataset.from_tensor_slices(self.int_text)
@@ -81,7 +81,7 @@ class Text_Generation():
     lstm_model.compile(optimizer=RMSprop(),metrics=['accuracy'], loss=loss)
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
     checkpoint_callback=tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint,save_weights_only=True)
-    history = lstm_model.fit(self.dataset, epochs=self.EPOCHS, callbacks=[checkpoint_callback,tensorboard_callback])
+    history = lstm_model.fit(self.dataset, epochs=self.EPOCHS, callbacks=[checkpoint_callback,tensorboard_callback,EarlyStopping(monitor='val_loss', patience=3)])
     self.generate_text()
 
   def generate_text(self):
@@ -106,6 +106,7 @@ class Text_Clasification():
         self.BATCH_SIZE = 128
         self.embedding_dim = 256
         self.EPOCH=50
+        self.log_dir = "logs/textclassification/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         self.df_train = pd.read_csv('train.txt', header =None, sep =';', names = ['input','sentiment'], encoding='utf-8')
         self.df_test = pd.read_csv('test.txt', header = None, sep =';', names = ['input','sentiment'],encoding='utf-8')
         self.hidden=[32,64,1024]
@@ -149,10 +150,9 @@ class Text_Clasification():
           model = self.RNN(hidden_units=h)
           model.summary() 
           model.compile(loss='sparse_categorical_crossentropy',optimizer=RMSprop(),metrics=['accuracy'])
-          log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-          tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+          tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
           model.fit(self.sequences_matrix,self.Y,batch_size=self.BATCH_SIZE,epochs=self.EPOCH,
-                    validation_split=0.2,callbacks=[tensorboard_callback,EarlyStopping(monitor='val_loss',min_delta=1)]) 
+                    validation_split=0.2,callbacks=[tensorboard_callback,EarlyStopping(monitor='val_loss', patience=3)]) 
           self.test(model,results)
 
   def test(self,model,results):  
@@ -176,6 +176,7 @@ class Image_Captioning():
         self.tokenizer.fit_on_texts(self.all_cptns)
         self.vocab_size = len(self.tokenizer.word_index) + 1
         self.max_len = max(len(cptn.split()) for cptn in self.all_cptns)
+        self.log_dir = "logs/imagecaptioning/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         self.batch_size=32
         self.img_ids = list(self.mapping.keys())
         self.train_data = self.img_ids[:int(len(self.img_ids) * 0.8)]
@@ -230,13 +231,13 @@ class Image_Captioning():
                         n = 0 
 
   def training_model(self):
-          resnet_model = ResNet50()
+          resnet_model = ResNet50(include_top=True)
           resnet_model = Model(inputs=resnet_model.inputs, outputs=resnet_model.layers[-2].output)
           for img_name in tqdm(self.img_files):
               img = load_img('/content/train/Images/' + img_name, target_size=(224,224))
               feature = resnet_model.predict(preprocess_input(np.expand_dims(img_to_array(img), axis=0)), verbose=0)
               self.features[img_name.split('.')[0]] = feature
-          input1 = Input(shape=(4096,))
+          input1 = Input(shape=(2048,))
           l1 = Dropout(0.1)(input1)
           l2 = Dense(1024, activation='relu')(l1)
           input2 = Input(shape=(self.max_len,))
@@ -246,13 +247,14 @@ class Image_Captioning():
           dcdr1 = add([l2,l5])
           dcdr2 = Dense(1024, activation='relu')(dcdr1)
           output = Dense(self.vocab_size, activation = 'softmax')(dcdr2)
-          self.train(output,[input1,input2])
+          model = Model(inputs=[input1, input2], outputs=output)
+          self.train(model)
 
-  def train(self,output,input):
-          model = Model(inputs=input, outputs=output)
-          model.compile(loss='categorical_crossentropy', optimizer='adam')
+  def train(self,model):
+          model.compile(loss='categorical_crossentropy', optimizer=RMSprop())
           generator = self.data_generator()
-          model.fit(generator, epochs=self.epoch, steps_per_epoch=self.steps, verbose=1)
+          tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
+          model.fit(generator, epochs=self.epoch, steps_per_epoch=self.steps, verbose=1, callbacks=[tensorboard_callback,EarlyStopping(monitor='val_loss', patience=3)])
           self.predict_captions(model)
 
   def word(self,intgr, tokenizer):
@@ -279,14 +281,15 @@ class Image_Captioning():
         img = cv2.cvtColor(cv2.imread('/content/train/Images/' + test_img_id + '.jpg', 1), cv2.COLOR_BGR2RGB)
         plt.imshow(img)
         print(in_text)
-    
+
+
+textclass=Text_Clasification()
+textclass.train()
+   
 textgeneration=Text_Generation()
 textgeneration.train()
 
 image=Image_Captioning()
 image.training_model()
-
-textclass=Text_Clasification()
-textclass.train()
 
   
