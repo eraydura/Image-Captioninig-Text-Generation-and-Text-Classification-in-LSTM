@@ -139,7 +139,6 @@ class Text_Clasification():
         layer = Dense(6,name='out_layer')(layer)
         layer = Activation('sigmoid')(layer)
         model = Model(inputs=inputs,outputs=layer)
-        model.compile(loss='mse', optimizer='adam')    
         return model    
 
   def train(self):
