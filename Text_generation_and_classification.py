@@ -1,5 +1,3 @@
-
-
 """
 ! pip install -q kaggle
 from google.colab import files
@@ -54,7 +52,7 @@ class Text_Generation():
       self.char_dataset = tf.data.Dataset.from_tensor_slices(self.int_text)
       self.sequences = self.char_dataset.batch(self.seq_length+1, drop_remainder=True)
       self.dataset = self.sequences.map(self.create_input_target_pair)
-      self.BATCH_SIZE = 64
+      self.BATCH_SIZE = 128
       self.BUFFER_SIZE = 10000
       self.dataset = self.dataset.shuffle(self.BUFFER_SIZE).batch(self.BATCH_SIZE, drop_remainder=True)
       self.vocab_size = len(self.vocabulary)
@@ -105,7 +103,7 @@ class Text_Clasification():
         self.max_len = 150
         self.BATCH_SIZE = 128
         self.embedding_dim = 256
-        self.EPOCH=50
+        self.EPOCH=20
         self.log_dir = "logs/textclassification/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         self.df_train = pd.read_csv('train.txt', header =None, sep =';', names = ['input','sentiment'], encoding='utf-8')
         self.df_test = pd.read_csv('test.txt', header = None, sep =';', names = ['input','sentiment'],encoding='utf-8')
@@ -138,7 +136,7 @@ class Text_Clasification():
         layer = Dense(256,name='FC1')(layer)
         layer = Activation('relu')(layer)
         layer = Dropout(0.2)(layer)
-        layer = Dense(13,name='out_layer')(layer)
+        layer = Dense(6,name='out_layer')(layer)
         layer = Activation('sigmoid')(layer)
         model = Model(inputs=inputs,outputs=layer)
         model.compile(loss='mse', optimizer='adam')    
@@ -177,12 +175,12 @@ class Image_Captioning():
         self.vocab_size = len(self.tokenizer.word_index) + 1
         self.max_len = max(len(cptn.split()) for cptn in self.all_cptns)
         self.log_dir = "logs/imagecaptioning/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        self.batch_size=32
+        self.batch_size=128
         self.img_ids = list(self.mapping.keys())
         self.train_data = self.img_ids[:int(len(self.img_ids) * 0.8)]
         self.test_data = self.img_ids[int(len(self.img_ids) * 0.8):]
         self.steps = len(self.train_data) // self.batch_size
-        self.epoch=2
+        self.epoch=20
         self.img_files = os.listdir('/content/train/Images')
 
   def data(self):
@@ -282,12 +280,11 @@ class Image_Captioning():
         plt.imshow(img)
         print(in_text)
 
+textgeneration=Text_Generation()
+textgeneration.train()
 
 textclass=Text_Clasification()
 textclass.train()
-   
-textgeneration=Text_Generation()
-textgeneration.train()
 
 image=Image_Captioning()
 image.training_model()
